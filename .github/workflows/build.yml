@@ -1,0 +1,70 @@
+name: guy-node-goat-build
+on: workflow_dispatch
+permissions:
+  actions: read # for detecting the Github Actions environment.
+  id-token: write # for creating OIDC tokens for signing.
+  packages: write # for uploading attestations.
+  contents: read
+  
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # JF_PROJECT: ${{ vars.JF_PROJECT_KEY }}
+      JF_URL: ${{ vars.JF_URL }}
+      JF_WATCHES: security-demo-watch
+      JFROG_CLI_LOG_LEVEL: DEBUG
+      DOCKER_IMAGE_NAME: ${{ vars.JF_DOCKER_REPOSITORY }}node-goat:1.0.${{github.run_number}}
+
+    steps:
+      # This action checks out the code from the repository
+      - name: Checkout Code
+        uses: actions/checkout@v4
+          
+      # Download the JFrog CLI and configure using JFrog Project and OIDC provider 
+      - uses: jfrog/setup-jfrog-cli@v4
+        name: Setup JFrog CLI
+        id: setup-cli
+        with:
+          version: latest
+          oidc-provider-name: guy-github
+      
+      # Configure JFrog CLI for NPM 
+      - name: Configure NPM
+        run: |
+          jf npmc --repo-deploy=guy-npm-dev --repo-resolve=guy-npm-dev 
+      # Run curation audit command
+      - name: Run Curation Audit
+        run:
+          jf curation-audit
+      #install npm dependencies
+      - name: Install npm dependencies
+        run: |
+          # npm install
+          jf npm install
+      # Scan code
+      - name: scan code
+        run: |
+          jf audit 
+          # --watches "Juice_Shopp_Watch"
+      # Using NPM Publish to uplaod the NPM Build 
+      - name: build & publish npm package
+        run: |
+          jf npm publish 
+      # Build and Push docker image
+      - name: docker build and push 
+        run: |
+          docker build -t $DOCKER_IMAGE_NAME .
+          jf docker push $DOCKER_IMAGE_NAME
+      # Scan docker image
+      - name: Scan docker
+        run: |
+          jf docker scan $DOCKER_IMAGE_NAME --watches "security-demo-watch" --fail=false
+      # Scan the NPM Build with Xray 
+      - name: scan build
+        run: |
+          jf rt build-publish
+          jf build-scan 
+      # Promote the Build from Dev to Production 
+      # - run: |
+      #    jf rt build-promote --status=production
